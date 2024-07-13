@@ -19,6 +19,8 @@ func setFuncField(service Service, p Proxy) error {
 	val := reflect.ValueOf(service)
 	typ := val.Type()
 	// 只支持指向结构体的一级指针
+	// Kind()返回typ变量的类型级别，若其为指针，则返回类型级别为指针
+	// Elum()返回对应元素的指针解引用，type.Elem()返回指针解引用也即对应的具体类型值，.Kind()返回类型级别
 	if typ.Kind() != reflect.Pointer || typ.Elem().Kind() != reflect.Struct {
 		return errors.New("rpc : 只支持指向结构体的一级指针")
 	}
@@ -35,7 +37,7 @@ func setFuncField(service Service, p Proxy) error {
 				// args[0] 是context
 				ctx := args[0].Interface().(context.Context)
 				// args[1] 是参数
-				// 构建请求参数,如果获取请求名称，①获取类型名，但是类型名会冲突；②包名+类型名；
+				// 构建请求参数,如何获取请求名称，①获取类型名，但是类型名会冲突；②包名+类型名；
 				// ③让所有调用实现一个接口，返回调用的名称,此时不需要关心命名空间
 				req := &Request{
 					ServiceName: service.Name(),
@@ -43,14 +45,18 @@ func setFuncField(service Service, p Proxy) error {
 					Args:        args[1].Interface(),
 				}
 
+				//
+				retVal := reflect.New(fieldTyp.Type.Out(0)).Elem()
+
 				// 发起调用
 				resp, err := p.Invoke(ctx, req)
 				if err != nil {
-					return []reflect.Value{reflect.Zero(fieldTyp.Type.Out(0)), reflect.ValueOf(err)}
+					return []reflect.Value{retVal, reflect.ValueOf(err)}
 				}
 
+				// 暂时先对响应做打印处理
 				fmt.Println(resp)
-				return []reflect.Value{reflect.Zero(fieldTyp.Type.Out(0)), reflect.ValueOf(errors.New("nil"))}
+				return []reflect.Value{retVal, reflect.Zero(reflect.TypeOf(new(error)).Elem())}
 			}
 			// 设置值给GetById
 			finVal := reflect.MakeFunc(fieldTyp.Type, fn)

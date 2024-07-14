@@ -2,17 +2,52 @@ package rpc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"fmt"
+	"github.com/silenceper/pool"
+	"go.learn.rpc/micro/common"
+	"net"
 	"reflect"
+	"time"
 )
 
-// InitClientProxy 要为GetById之类的函数类型的字段赋值
-func InitClientProxy(service Service) error {
-	return setFuncField(service, nil)
+type Client struct {
+	// 使用连接池优化，替代之前的addr string，连接池中会使用到addr
+	pool pool.Pool
 }
 
-func setFuncField(service Service, p Proxy) error {
+func NewClient(addr string) (*Client, error) {
+	p, err := pool.NewChannelPool(&pool.Config{
+		InitialCap:  1,
+		MaxCap:      30,
+		MaxIdle:     10,
+		IdleTimeout: time.Minute,
+		Factory: func() (interface{}, error) {
+			return net.DialTimeout("tcp", addr, 3*time.Second)
+		},
+		Close: func(i interface{}) error {
+			return i.(net.Conn).Close()
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &Client{
+		pool: p,
+	}, nil
+}
+
+// InitClientProxy 要为GetById之类的函数类型的字段赋值
+// InitClientProxy 的作用就是捕获本地调用，构建请求参数：服务名、方法名、调用参数，随后发起调用
+func InitClientProxy(addr string, service common.Service) error {
+	client, err := NewClient(addr)
+	if err != nil {
+		return err
+	}
+	return setFuncField(service, client)
+}
+
+func setFuncField(service common.Service, p common.Proxy) error {
 	if service == nil {
 		return errors.New("rpc : 不支持service为 nil")
 	}
@@ -34,19 +69,22 @@ func setFuncField(service Service, p Proxy) error {
 		if fieldVal.CanSet() {
 			// 这里才是真正的将本地调用捕捉到的地方
 			fn := func(args []reflect.Value) (results []reflect.Value) {
+				//
+				retVal := reflect.New(fieldTyp.Type.Out(0).Elem())
 				// args[0] 是context
 				ctx := args[0].Interface().(context.Context)
 				// args[1] 是参数
 				// 构建请求参数,如何获取请求名称，①获取类型名，但是类型名会冲突；②包名+类型名；
 				// ③让所有调用实现一个接口，返回调用的名称,此时不需要关心命名空间
-				req := &Request{
+				reqData, err := json.Marshal(args[1].Interface())
+				if err != nil {
+					return []reflect.Value{retVal, reflect.ValueOf(err)}
+				}
+				req := &common.Request{
 					ServiceName: service.Name(),
 					MethodName:  fieldTyp.Name,
-					Args:        args[1].Interface(),
+					Args:        reqData,
 				}
-
-				//
-				retVal := reflect.New(fieldTyp.Type.Out(0)).Elem()
 
 				// 发起调用
 				resp, err := p.Invoke(ctx, req)
@@ -54,8 +92,10 @@ func setFuncField(service Service, p Proxy) error {
 					return []reflect.Value{retVal, reflect.ValueOf(err)}
 				}
 
-				// 暂时先对响应做打印处理
-				fmt.Println(resp)
+				err = json.Unmarshal(resp.data, retVal.Interface())
+				if err != nil {
+					return []reflect.Value{retVal, reflect.ValueOf(err)}
+				}
 				return []reflect.Value{retVal, reflect.Zero(reflect.TypeOf(new(error)).Elem())}
 			}
 			// 设置值给GetById
@@ -64,4 +104,38 @@ func setFuncField(service Service, p Proxy) error {
 		}
 	}
 	return nil
+}
+
+func (c *Client) Invoke(ctx context.Context, req *common.Request) (*common.Response, error) {
+	// 使用Json序列化数据
+	data, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	// 客户端发送请求
+	resp, err := c.Send(data)
+	if err != nil {
+		return nil, err
+	}
+
+	return &common.Response{
+		data: resp,
+	}, nil
+}
+
+func (c *Client) Send(data []byte) ([]byte, error) {
+	// 从连接池中获取连接
+	val, err := c.pool.Get()
+	if err != nil {
+		return nil, err
+	}
+	conn := val.(net.Conn)
+	defer func() {
+		_ = conn.Close()
+	}()
+	err = common.WriteMsg(conn, data)
+	if err != nil {
+		return nil, err
+	}
+	return common.ReadMsg(conn)
 }

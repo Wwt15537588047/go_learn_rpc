@@ -1,4 +1,4 @@
-package rpc
+package common
 
 import "context"
 
@@ -13,8 +13,9 @@ type Proxy interface {
 type Request struct {
 	ServiceName string
 	MethodName  string
-	Args        any
+	Args        []byte
 }
 
 type Response struct {
+	data []byte
 }

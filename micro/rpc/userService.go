@@ -1,11 +1,15 @@
 package rpc
 
-import "context"
+import (
+	"context"
+	"log"
+)
 
 type GetByUserIdReq struct {
 	Id int
 }
 type GetByUserIdResp struct {
+	Msg string
 }
 
 type UserService struct {
@@ -15,6 +19,19 @@ type UserService struct {
 }
 
 func (u UserService) Name() string {
-	//TODO implement me
+	return "user_service"
+}
+
+// 上面的 UserService只是一个定义，相当于注册中心的作用，下面的UserServiceServer是服务端的一个具体的实现
+type UserServiceServer struct {
+}
+
+func (u *UserServiceServer) GetById(ctx context.Context, req *GetByUserIdReq) (*GetByUserIdResp, error) {
+	log.Println(req)
+	return &GetByUserIdResp{
+		Msg: "hello world",
+	}, nil
+}
+func (u *UserServiceServer) Name() string {
 	return "user_service"
 }

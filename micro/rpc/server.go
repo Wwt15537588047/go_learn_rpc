@@ -29,6 +29,7 @@ func (s *Server) RegisterServer(service common.Service) {
 func (s *Server) Start(network, addr string) error {
 	// Listen的第一个参数network规定通信的协议，tcp还是udp,第二个参数addr里面包含地址和端口
 	listener, err := net.Listen(network, addr)
+	defer listener.Close()
 	if err != nil {
 		// 比较常见的就是端口占用
 		return err
@@ -65,13 +66,14 @@ func (s *Server) handleConn(conn net.Conn) error {
 			return err
 		}
 
+		// context.BackGround用于创建一个新的上下文
 		resp, err := s.Invoke(context.Background(), req)
 		if err != nil {
 			// 此处是自己的业务逻辑，正常处理逻辑应该是将业务逻辑封装随后返回给调用端
 			// 这里简单处理，直接返回错误，关闭连接
 			return err
 		}
-		err = common.WriteMsg(conn, resp.data)
+		err = common.WriteMsg(conn, resp.Data)
 		if err != nil {
 			return err
 		}
@@ -90,7 +92,7 @@ func (s *Server) Invoke(ctx context.Context, req *common.Request) (*common.Respo
 		return nil, err
 	}
 	return &common.Response{
-		data: respData,
+		Data: respData,
 	}, nil
 }
 

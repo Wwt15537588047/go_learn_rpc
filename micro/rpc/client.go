@@ -23,9 +23,11 @@ func NewClient(addr string) (*Client, error) {
 		MaxIdle:     10,
 		IdleTimeout: time.Minute,
 		Factory: func() (interface{}, error) {
+			// 创建一个新的TCP连接，连接超时时间为3s
 			return net.DialTimeout("tcp", addr, 3*time.Second)
 		},
 		Close: func(i interface{}) error {
+			// 对于连接池中的连接执行的关闭实现
 			return i.(net.Conn).Close()
 		},
 	})
@@ -69,7 +71,7 @@ func setFuncField(service common.Service, p common.Proxy) error {
 		if fieldVal.CanSet() {
 			// 这里才是真正的将本地调用捕捉到的地方
 			fn := func(args []reflect.Value) (results []reflect.Value) {
-				//
+				// GetById函数返回值，第一个值类型为Response，第二个值类型为error
 				retVal := reflect.New(fieldTyp.Type.Out(0).Elem())
 				// args[0] 是context
 				ctx := args[0].Interface().(context.Context)
@@ -92,7 +94,7 @@ func setFuncField(service common.Service, p common.Proxy) error {
 					return []reflect.Value{retVal, reflect.ValueOf(err)}
 				}
 
-				err = json.Unmarshal(resp.data, retVal.Interface())
+				err = json.Unmarshal(resp.Data, retVal.Interface())
 				if err != nil {
 					return []reflect.Value{retVal, reflect.ValueOf(err)}
 				}
@@ -119,7 +121,7 @@ func (c *Client) Invoke(ctx context.Context, req *common.Request) (*common.Respo
 	}
 
 	return &common.Response{
-		data: resp,
+		Data: resp,
 	}, nil
 }
 

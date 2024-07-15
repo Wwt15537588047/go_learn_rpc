@@ -2,10 +2,11 @@ package rpc
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"github.com/silenceper/pool"
 	"go.learn.rpc/micro/rpc/message"
+	"go.learn.rpc/micro/rpc/serialize"
+	"go.learn.rpc/micro/rpc/serialize/json"
 	"net"
 	"reflect"
 	"time"
@@ -13,10 +14,19 @@ import (
 
 type Client struct {
 	// 使用连接池优化，替代之前的addr string，连接池中会使用到addr
-	pool pool.Pool
+	pool       pool.Pool
+	serializer serialize.Serializer
 }
 
-func NewClient(addr string) (*Client, error) {
+type ClientOption func(client *Client)
+
+func ClientWithSerializer(sl serialize.Serializer) ClientOption {
+	return func(client *Client) {
+		client.serializer = sl
+	}
+}
+
+func NewClient(addr string, opts ...ClientOption) (*Client, error) {
 	p, err := pool.NewChannelPool(&pool.Config{
 		InitialCap:  1,
 		MaxCap:      30,
@@ -34,22 +44,23 @@ func NewClient(addr string) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{
-		pool: p,
-	}, nil
+	res := &Client{
+		pool:       p,
+		serializer: &json.Serializer{},
+	}
+	for _, opt := range opts {
+		opt(res)
+	}
+	return res, nil
 }
 
 // InitClientProxy 要为GetById之类的函数类型的字段赋值
 // InitClientProxy 的作用就是捕获本地调用，构建请求参数：服务名、方法名、调用参数，随后发起调用
-func InitClientProxy(addr string, service Service) error {
-	client, err := NewClient(addr)
-	if err != nil {
-		return err
-	}
-	return setFuncField(service, client)
+func (c *Client) InitService(service Service) error {
+	return setFuncField(service, c, c.serializer)
 }
 
-func setFuncField(service Service, p Proxy) error {
+func setFuncField(service Service, p Proxy, serializer serialize.Serializer) error {
 	if service == nil {
 		return errors.New("rpc : 不支持service为 nil")
 	}
@@ -78,7 +89,7 @@ func setFuncField(service Service, p Proxy) error {
 				// args[1] 是参数
 				// 构建请求参数,如何获取请求名称，①获取类型名，但是类型名会冲突；②包名+类型名；
 				// ③让所有调用实现一个接口，返回调用的名称,此时不需要关心命名空间
-				reqData, err := json.Marshal(args[1].Interface())
+				reqData, err := serializer.Encode(args[1].Interface())
 				if err != nil {
 					return []reflect.Value{retVal, reflect.ValueOf(err)}
 				}
@@ -86,6 +97,7 @@ func setFuncField(service Service, p Proxy) error {
 					ServiceName: service.Name(),
 					MethodName:  fieldTyp.Name,
 					Data:        reqData,
+					Serializer:  serializer.Code(),
 				}
 				req.CalculateHeaderLength()
 				req.CalculateBodyLength()
@@ -103,7 +115,7 @@ func setFuncField(service Service, p Proxy) error {
 				}
 
 				if len(resp.Data) > 0 {
-					err = json.Unmarshal(resp.Data, retVal.Interface())
+					err = serializer.DeCode(resp.Data, retVal.Interface())
 					if err != nil {
 						//反序列化失败
 						return []reflect.Value{retVal, reflect.ValueOf(err)}

@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"context"
+	"go.learn.rpc/micro/proto/gen"
 	"log"
 )
 
@@ -16,6 +17,9 @@ type UserService struct {
 	// 用反射来赋值
 	// 下面这个不叫方法，只能叫做类型是函数的字段，不是方法（它不是定义在UserService上的方法，本质上是一个字段）
 	GetById func(ctx context.Context, req *GetByUserIdReq) (*GetByUserIdResp, error)
+
+	// 测试protobuf编解码
+	GetByIdProto func(ctx context.Context, req *gen.GetByIdReq) (*gen.GetByIdResp, error)
 }
 
 func (u UserService) Name() string {
@@ -32,6 +36,15 @@ func (u *UserServiceServer) GetById(ctx context.Context, req *GetByUserIdReq) (*
 	log.Println(req)
 	return &GetByUserIdResp{
 		Msg: u.Msg,
+	}, u.Err
+}
+
+func (u *UserServiceServer) GetByIdProto(ctx context.Context, req *gen.GetByIdReq) (*gen.GetByIdResp, error) {
+	log.Println(req)
+	return &gen.GetByIdResp{
+		User: &gen.User{
+			Name: u.Msg,
+		},
 	}, u.Err
 }
 func (u *UserServiceServer) Name() string {

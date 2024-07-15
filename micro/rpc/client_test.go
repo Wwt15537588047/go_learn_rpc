@@ -6,6 +6,7 @@ import (
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 	"go.learn.rpc/micro/rpc/message"
+	"go.learn.rpc/micro/rpc/serialize/json"
 	"testing"
 )
 
@@ -46,11 +47,12 @@ func Test_setFuncField(t *testing.T) {
 			service: &UserService{},
 		},
 	}
+	s := json.Serializer{}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			defer ctrl.Finish()
-			err := setFuncField(tc.service, tc.mock(ctrl))
+			err := setFuncField(tc.service, tc.mock(ctrl), s)
 			assert.Equal(t, tc.wantErr, err)
 
 			if err != nil {

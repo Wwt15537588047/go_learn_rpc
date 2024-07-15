@@ -2,27 +2,37 @@ package rpc
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"go.learn.rpc/micro/rpc/message"
+	"go.learn.rpc/micro/rpc/serialize"
+	"go.learn.rpc/micro/rpc/serialize/json"
 	"net"
 	"reflect"
 )
 
 type Server struct {
-	services map[string]reflectionStub
+	services    map[string]reflectionStub
+	serializers map[uint8]serialize.Serializer
 }
 
 func NewServer1() *Server {
-	return &Server{
-		services: make(map[string]reflectionStub, 16),
+	ser := &Server{
+		services:    make(map[string]reflectionStub, 16),
+		serializers: make(map[uint8]serialize.Serializer, 4),
 	}
+	// 注册一个默认的序列化协议
+	ser.RegisterSerializer(&json.Serializer{})
+	return ser
+}
+func (s *Server) RegisterSerializer(serializer serialize.Serializer) {
+	s.serializers[serializer.Code()] = serializer
 }
 
 func (s *Server) RegisterServer(service Service) {
 	s.services[service.Name()] = reflectionStub{
-		s:     service,
-		value: reflect.ValueOf(service),
+		s:           service,
+		value:       reflect.ValueOf(service),
+		serializers: s.serializers,
 	}
 }
 
@@ -69,8 +79,7 @@ func (s *Server) handleConn(conn net.Conn) error {
 		// context.BackGround用于创建一个新的上下文
 		resp, err := s.Invoke(context.Background(), req)
 		if err != nil {
-			// 此处是自己的业务逻辑，正常处理逻辑应该是将业务逻辑封装随后返回给调用端
-			// 这里简单处理，直接返回错误，关闭连接
+			// 此处是自己的业务逻辑，正常处理逻辑应该是将业务逻辑封装随后返回给调用端,将错误封装在resp.Error里
 			resp.Error = []byte(err.Error())
 		}
 		resp.CalculateHeaderLength()
@@ -95,7 +104,7 @@ func (s *Server) Invoke(ctx context.Context, req *message.Request) (*message.Res
 	if !ok {
 		return resp, errors.New("你所调用的服务不存在")
 	}
-	respData, err := service.invoke(ctx, req.MethodName, req.Data)
+	respData, err := service.invoke(ctx, req)
 	resp.Data = respData
 	if err != nil {
 		return resp, err
@@ -104,19 +113,25 @@ func (s *Server) Invoke(ctx context.Context, req *message.Request) (*message.Res
 }
 
 type reflectionStub struct {
-	s     Service
-	value reflect.Value
+	s           Service
+	value       reflect.Value
+	serializers map[uint8]serialize.Serializer
 }
 
 // reflectionStub相当于一个桩，找到一个桩，随后在桩里面解决反射的问题
-func (s *reflectionStub) invoke(ctx context.Context, methodName string, data []byte) ([]byte, error) {
+func (s *reflectionStub) invoke(ctx context.Context, req *message.Request) ([]byte, error) {
 	// 反射执行方法，并且执行
-	method := s.value.MethodByName(methodName)
+	method := s.value.MethodByName(req.MethodName)
 	in := make([]reflect.Value, 2)
 	// 暂时没有传下标0对应的参数，直接写死
 	in[0] = reflect.ValueOf(context.Background())
 	inReq := reflect.New(method.Type().In(1).Elem())
-	err := json.Unmarshal(data, inReq.Interface())
+	// 拿取规定的序列化协议
+	serializer, ok := s.serializers[req.Serializer]
+	if !ok {
+		return nil, errors.New("Server 不支持的序列化协议.")
+	}
+	err := serializer.DeCode(req.Data, inReq.Interface())
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +146,8 @@ func (s *reflectionStub) invoke(ctx context.Context, methodName string, data []b
 		return nil, err
 	} else {
 		var er error
-		res, er = json.Marshal(results[0].Interface())
+		// 使用自定义序列化协议编码Data
+		res, er = serializer.Encode(results[0].Interface())
 		if er != nil {
 			// 反序列化出错，返回nil数据
 			return nil, er

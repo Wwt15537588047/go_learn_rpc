@@ -1,4 +1,4 @@
-package common
+package rpc
 
 import (
 	"encoding/binary"
@@ -15,9 +15,12 @@ func ReadMsg(conn net.Conn) ([]byte, error) {
 		return nil, err
 	}
 	// ⑤构造并读取接收数据
-	length := binary.BigEndian.Uint64(lenBs)
+	headerLength := binary.BigEndian.Uint32(lenBs[:4])
+	bodyLength := binary.BigEndian.Uint32(lenBs[4:])
+	length := headerLength + bodyLength
 	data := make([]byte, length)
-	_, err = conn.Read(data)
+	_, err = conn.Read(data[8:])
+	copy(data[:8], lenBs)
 	return data, err
 }
 

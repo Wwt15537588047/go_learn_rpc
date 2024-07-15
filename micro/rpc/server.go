@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"go.learn.rpc/micro/common"
+	"go.learn.rpc/micro/rpc/message"
 	"net"
 	"reflect"
 )
@@ -19,7 +19,7 @@ func NewServer1() *Server {
 	}
 }
 
-func (s *Server) RegisterServer(service common.Service) {
+func (s *Server) RegisterServer(service Service) {
 	s.services[service.Name()] = reflectionStub{
 		s:     service,
 		value: reflect.ValueOf(service),
@@ -55,13 +55,13 @@ func (s *Server) Start(network, addr string) error {
 // 响应数据也是这样规定的
 func (s *Server) handleConn(conn net.Conn) error {
 	for {
-		reqBs, err := common.ReadMsg(conn)
+		reqBs, err := ReadMsg(conn)
 		if err != nil {
+			// 这里是连接err
 			return err
 		}
 		// 获取请求数据
-		req := &common.Request{}
-		err = json.Unmarshal(reqBs, req)
+		req := message.DeCodeReq(reqBs)
 		if err != nil {
 			return err
 		}
@@ -71,9 +71,11 @@ func (s *Server) handleConn(conn net.Conn) error {
 		if err != nil {
 			// 此处是自己的业务逻辑，正常处理逻辑应该是将业务逻辑封装随后返回给调用端
 			// 这里简单处理，直接返回错误，关闭连接
-			return err
+			resp.Error = []byte(err.Error())
 		}
-		err = common.WriteMsg(conn, resp.Data)
+		resp.CalculateHeaderLength()
+		resp.CalculateBodyLength()
+		_, err = conn.Write(message.EnCodeResp(resp))
 		if err != nil {
 			return err
 		}
@@ -81,23 +83,28 @@ func (s *Server) handleConn(conn net.Conn) error {
 	}
 }
 
-func (s *Server) Invoke(ctx context.Context, req *common.Request) (*common.Response, error) {
+func (s *Server) Invoke(ctx context.Context, req *message.Request) (*message.Response, error) {
 	// 还原业务调用，此时已经拿到了service name,method name 和参数了
 	service, ok := s.services[req.ServiceName]
+	resp := &message.Response{
+		MessageId:  req.MessageId,
+		Version:    req.Version,
+		Compresser: req.Compresser,
+		Serializer: req.Serializer,
+	}
 	if !ok {
-		return nil, errors.New("你所调用的服务不存在")
+		return resp, errors.New("你所调用的服务不存在")
 	}
-	respData, err := service.invoke(ctx, req.MethodName, req.Args)
+	respData, err := service.invoke(ctx, req.MethodName, req.Data)
+	resp.Data = respData
 	if err != nil {
-		return nil, err
+		return resp, err
 	}
-	return &common.Response{
-		Data: respData,
-	}, nil
+	return resp, nil
 }
 
 type reflectionStub struct {
-	s     common.Service
+	s     Service
 	value reflect.Value
 }
 
@@ -116,7 +123,19 @@ func (s *reflectionStub) invoke(ctx context.Context, methodName string, data []b
 	in[1] = inReq
 	results := method.Call(in)
 	if results[1].Interface() != nil {
-		return nil, results[1].Interface().(error)
+		err = results[1].Interface().(error)
 	}
-	return json.Marshal(results[0].Interface())
+	var res []byte
+	if results[0].IsNil() {
+		// 没有数据可反序列化，直接返回nil数据
+		return nil, err
+	} else {
+		var er error
+		res, er = json.Marshal(results[0].Interface())
+		if er != nil {
+			// 反序列化出错，返回nil数据
+			return nil, er
+		}
+	}
+	return res, err
 }

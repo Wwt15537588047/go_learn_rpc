@@ -6,10 +6,10 @@ package rpc
 
 import (
 	context "context"
-	"go.learn.rpc/micro/common"
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
+	message "go.learn.rpc/micro/rpc/message"
 )
 
 // MockService is a mock of Service interface.
@@ -73,10 +73,10 @@ func (m *MockProxy) EXPECT() *MockProxyMockRecorder {
 }
 
 // Invoke mocks base method.
-func (m *MockProxy) Invoke(ctx context.Context, req *common.Request) (*common.Response, error) {
+func (m *MockProxy) Invoke(ctx context.Context, req *message.Request) (*message.Response, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Invoke", ctx, req)
-	ret0, _ := ret[0].(*common.Response)
+	ret0, _ := ret[0].(*message.Response)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }

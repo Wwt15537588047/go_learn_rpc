@@ -24,13 +24,15 @@ func (u UserService) Name() string {
 
 // 上面的 UserService只是一个定义，相当于注册中心的作用，下面的UserServiceServer是服务端的一个具体的实现
 type UserServiceServer struct {
+	Err error
+	Msg string
 }
 
 func (u *UserServiceServer) GetById(ctx context.Context, req *GetByUserIdReq) (*GetByUserIdResp, error) {
 	log.Println(req)
 	return &GetByUserIdResp{
-		Msg: "hello world",
-	}, nil
+		Msg: u.Msg,
+	}, u.Err
 }
 func (u *UserServiceServer) Name() string {
 	return "user_service"

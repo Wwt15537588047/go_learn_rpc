@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/silenceper/pool"
-	"go.learn.rpc/micro/common"
+	"go.learn.rpc/micro/rpc/message"
 	"net"
 	"reflect"
 	"time"
@@ -41,7 +41,7 @@ func NewClient(addr string) (*Client, error) {
 
 // InitClientProxy 要为GetById之类的函数类型的字段赋值
 // InitClientProxy 的作用就是捕获本地调用，构建请求参数：服务名、方法名、调用参数，随后发起调用
-func InitClientProxy(addr string, service common.Service) error {
+func InitClientProxy(addr string, service Service) error {
 	client, err := NewClient(addr)
 	if err != nil {
 		return err
@@ -49,7 +49,7 @@ func InitClientProxy(addr string, service common.Service) error {
 	return setFuncField(service, client)
 }
 
-func setFuncField(service common.Service, p common.Proxy) error {
+func setFuncField(service Service, p Proxy) error {
 	if service == nil {
 		return errors.New("rpc : 不支持service为 nil")
 	}
@@ -82,11 +82,13 @@ func setFuncField(service common.Service, p common.Proxy) error {
 				if err != nil {
 					return []reflect.Value{retVal, reflect.ValueOf(err)}
 				}
-				req := &common.Request{
+				req := &message.Request{
 					ServiceName: service.Name(),
 					MethodName:  fieldTyp.Name,
-					Args:        reqData,
+					Data:        reqData,
 				}
+				req.CalculateHeaderLength()
+				req.CalculateBodyLength()
 
 				// 发起调用
 				resp, err := p.Invoke(ctx, req)
@@ -94,11 +96,26 @@ func setFuncField(service common.Service, p common.Proxy) error {
 					return []reflect.Value{retVal, reflect.ValueOf(err)}
 				}
 
-				err = json.Unmarshal(resp.Data, retVal.Interface())
-				if err != nil {
-					return []reflect.Value{retVal, reflect.ValueOf(err)}
+				var retErr error
+				if len(resp.Error) > 0 {
+					// 服务端传回来的error
+					retErr = errors.New(string(resp.Error))
 				}
-				return []reflect.Value{retVal, reflect.Zero(reflect.TypeOf(new(error)).Elem())}
+
+				if len(resp.Data) > 0 {
+					err = json.Unmarshal(resp.Data, retVal.Interface())
+					if err != nil {
+						//反序列化失败
+						return []reflect.Value{retVal, reflect.ValueOf(err)}
+					}
+				}
+				var retErrVal reflect.Value
+				if retErr == nil {
+					retErrVal = reflect.Zero(reflect.TypeOf(new(error)).Elem())
+				} else {
+					retErrVal = reflect.ValueOf(retErr)
+				}
+				return []reflect.Value{retVal, retErrVal}
 			}
 			// 设置值给GetById
 			finVal := reflect.MakeFunc(fieldTyp.Type, fn)
@@ -108,21 +125,16 @@ func setFuncField(service common.Service, p common.Proxy) error {
 	return nil
 }
 
-func (c *Client) Invoke(ctx context.Context, req *common.Request) (*common.Response, error) {
+func (c *Client) Invoke(ctx context.Context, req *message.Request) (*message.Response, error) {
 	// 使用Json序列化数据
-	data, err := json.Marshal(req)
-	if err != nil {
-		return nil, err
-	}
+	data := message.EnCodeReq(req)
 	// 客户端发送请求
 	resp, err := c.Send(data)
 	if err != nil {
-		return nil, err
+		return message.DeCodeResp(resp), err
 	}
 
-	return &common.Response{
-		Data: resp,
-	}, nil
+	return message.DeCodeResp(resp), nil
 }
 
 func (c *Client) Send(data []byte) ([]byte, error) {
@@ -135,9 +147,10 @@ func (c *Client) Send(data []byte) ([]byte, error) {
 	defer func() {
 		_ = conn.Close()
 	}()
-	err = common.WriteMsg(conn, data)
+	//err = WriteMsg(conn, data)
+	_, err = conn.Write(data)
 	if err != nil {
 		return nil, err
 	}
-	return common.ReadMsg(conn)
+	return ReadMsg(conn)
 }

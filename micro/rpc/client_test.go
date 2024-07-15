@@ -5,20 +5,20 @@ import (
 	"errors"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
-	"go.learn.rpc/micro/common"
+	"go.learn.rpc/micro/rpc/message"
 	"testing"
 )
 
 func Test_setFuncField(t *testing.T) {
 	testCases := []struct {
 		name    string
-		mock    func(ctrl *gomock.Controller) common.Proxy
-		service common.Service
+		mock    func(ctrl *gomock.Controller) Proxy
+		service Service
 		wantErr error
 	}{
 		{
 			name: "nil",
-			mock: func(ctrl *gomock.Controller) common.Proxy {
+			mock: func(ctrl *gomock.Controller) Proxy {
 				return NewMockProxy(ctrl)
 			},
 			service: nil,
@@ -26,7 +26,7 @@ func Test_setFuncField(t *testing.T) {
 		},
 		{
 			name: "no pointer",
-			mock: func(ctrl *gomock.Controller) common.Proxy {
+			mock: func(ctrl *gomock.Controller) Proxy {
 				return NewMockProxy(ctrl)
 			},
 			service: UserService{},
@@ -34,13 +34,13 @@ func Test_setFuncField(t *testing.T) {
 		},
 		{
 			name: "user service",
-			mock: func(ctrl *gomock.Controller) common.Proxy {
+			mock: func(ctrl *gomock.Controller) Proxy {
 				p := NewMockProxy(ctrl)
-				p.EXPECT().Invoke(gomock.Any(), &common.Request{
+				p.EXPECT().Invoke(gomock.Any(), &message.Request{
 					ServiceName: "user_service",
 					MethodName:  "GetById",
-					Args:        []byte(`{"Id" : "123"}"`),
-				}).Return(&common.Response{}, nil)
+					Data:        []byte(`{"Id" : "123"}"`),
+				}).Return(&message.Response{}, nil)
 				return p
 			},
 			service: &UserService{},

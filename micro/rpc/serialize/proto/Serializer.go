@@ -1,7 +1,6 @@
 package proto
 
 import (
-	"encoding/json"
 	"errors"
 	"github.com/golang/protobuf/proto"
 )
@@ -26,5 +25,5 @@ func (s Serializer) DeCode(data []byte, val any) error {
 	if !ok {
 		return errors.New("micro 必须是 proto.Message")
 	}
-	return json.Unmarshal(data, msg)
+	return proto.Unmarshal(data, msg)
 }
